@@ -20,7 +20,6 @@ from data.models import Task
 
 logger = logging.getLogger(__name__)
 
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Circular progress ring
 # ─────────────────────────────────────────────────────────────────────────────
@@ -68,20 +67,12 @@ class _RingWidget(QWidget):
 class TimerWidget(QWidget):
     """
     Full Pomodoro timer panel.
-
-    Signals:
-        start_requested()   — user clicked Start
-        pause_requested()   — user clicked Pause
-        stop_requested()    — user clicked Stop
-        skip_requested()    — user clicked Skip
     """
-
     start_requested  = Signal()
     pause_requested  = Signal()
     stop_requested   = Signal()
     skip_requested   = Signal()
 
-    # Phase colours
     _PHASE_COLORS = {
         PomodoroState.WORK:        QColor("#4CAF50"),
         PomodoroState.SHORT_BREAK: QColor("#FF9800"),
@@ -106,12 +97,9 @@ class TimerWidget(QWidget):
         self._setup_ui()
         self._connect_engine()
 
-        # QTimer drives engine.tick()
         self._qtimer = QTimer(self)
         self._qtimer.setInterval(1000)
         self._qtimer.timeout.connect(self._on_timer_tick)
-
-    # ── UI setup ──────────────────────────────────────────────────────────────
 
     def _setup_ui(self) -> None:
         self.setObjectName("timerPanel")
@@ -126,19 +114,19 @@ class TimerWidget(QWidget):
         self._phase_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         root.addWidget(self._phase_label)
 
-        # Ring + timer label stacked
-        ring_container = QWidget()
-        ring_container.setFixedSize(220, 220)
-        self._ring = _RingWidget(ring_container)
-        self._ring.setGeometry(0, 0, 220, 220)
-
+        # استفاده از Layout برای مرکز نگه داشتن متن تایمر درون حلقه
+        self._ring = _RingWidget()
+        self._ring.setFixedSize(220, 220)
+        
+        ring_layout = QVBoxLayout(self._ring)
+        ring_layout.setContentsMargins(0, 0, 0, 0)
+        
         self._time_label = QLabel("25:00")
         self._time_label.setObjectName("timerLabel")
         self._time_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._time_label.setGeometry(0, 0, 220, 220)
-        self._time_label.setParent(ring_container)
+        ring_layout.addWidget(self._time_label, alignment=Qt.AlignmentFlag.AlignCenter)
 
-        root.addWidget(ring_container, alignment=Qt.AlignmentFlag.AlignCenter)
+        root.addWidget(self._ring, alignment=Qt.AlignmentFlag.AlignCenter)
 
         # Session count
         self._session_label = QLabel("نشست ۰")
@@ -175,23 +163,16 @@ class TimerWidget(QWidget):
         btn_row.addWidget(self._skip_btn)
         root.addLayout(btn_row)
 
-        # Signals → buttons
         self._start_btn.clicked.connect(self._on_start_clicked)
         self._stop_btn.clicked.connect(self.stop_requested)
         self._skip_btn.clicked.connect(self.skip_requested)
-
-    # ── Engine connection ─────────────────────────────────────────────────────
 
     def _connect_engine(self) -> None:
         self._engine.on_tick         = self._on_engine_tick
         self._engine.on_phase_change = self._on_engine_phase_change
         self._engine.on_complete     = self._on_engine_complete
 
-    # ── Slots (from engine callbacks – may arrive from non-UI thread) ─────────
-
-    def _on_engine_tick(
-        self, state: PomodoroState, remaining: int, total: int
-    ) -> None:
+    def _on_engine_tick(self, state: PomodoroState, remaining: int, total: int) -> None:
         mm = remaining // 60
         ss = remaining % 60
         self._time_label.setText(f"{mm:02d}:{ss:02d}")
@@ -200,9 +181,7 @@ class TimerWidget(QWidget):
         color = self._PHASE_COLORS.get(state, QColor("#6C63FF"))
         self._ring.set_progress(progress, color)
 
-    def _on_engine_phase_change(
-        self, state: PomodoroState, session_count: int
-    ) -> None:
+    def _on_engine_phase_change(self, state: PomodoroState, session_count: int) -> None:
         label = self._PHASE_LABELS.get(state, "")
         self._phase_label.setText(label)
         self._session_label.setText(f"نشست {session_count}")
@@ -220,16 +199,12 @@ class TimerWidget(QWidget):
             self._is_running = False
             self._qtimer.stop()
 
-    def _on_engine_complete(
-        self, completed_state: PomodoroState, duration: int
-    ) -> None:
+    def _on_engine_complete(self, completed_state: PomodoroState, duration: int) -> None:
         logger.info("Phase complete: %s (%ds)", completed_state.name, duration)
 
     @Slot()
     def _on_timer_tick(self) -> None:
         self._engine.tick()
-
-    # ── Button handlers ───────────────────────────────────────────────────────
 
     def _on_start_clicked(self) -> None:
         state = self._engine.state
@@ -251,10 +226,7 @@ class TimerWidget(QWidget):
             self._is_running = False
             self.pause_requested.emit()
 
-    # ── Public API ────────────────────────────────────────────────────────────
-
     def set_tasks(self, tasks: list[Task]) -> None:
-        """Populate the task dropdown."""
         self._task_combo.clear()
         self._task_combo.addItem("— بدون وظیفه —", None)
         for task in tasks:
@@ -281,7 +253,6 @@ class TimerWidget(QWidget):
 
     @Slot(int)
     def set_active_task_by_id(self, task_id: int) -> None:
-        """Select a task in the dropdown by its database ID."""
         for i in range(self._task_combo.count()):
             if self._task_combo.itemData(i) == task_id:
                 self._task_combo.setCurrentIndex(i)

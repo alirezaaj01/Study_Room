@@ -9,14 +9,13 @@ import logging
 from PySide6.QtCore import Qt, Signal, Slot
 from PySide6.QtWidgets import (
     QHBoxLayout, QLabel, QPushButton, QScrollArea,
-    QSlider, QVBoxLayout, QWidget,
+    QSlider, QVBoxLayout, QWidget, QGridLayout
 )
 
 from media.audio_mixer import AudioMixer
 
 logger = logging.getLogger(__name__)
 
-# Icon mapping for each channel (emoji fallback)
 _CHANNEL_ICONS = {
     "rain":       "🌧",
     "fireplace":  "🔥",
@@ -24,7 +23,6 @@ _CHANNEL_ICONS = {
     "keyboard":   "⌨",
     "whitenoise": "🌊",
 }
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Single channel control card
@@ -40,6 +38,8 @@ class _ChannelCard(QWidget):
         self.setObjectName("channelCard")
         self._name = name
         self._muted = False
+        # حداقل عرض را تنظیم می‌کنیم تا کارت‌ها بیش از حد فشرده نشوند
+        self.setMinimumWidth(80) 
         self._setup_ui(initial_volume)
 
     def _setup_ui(self, volume: float) -> None:
@@ -48,19 +48,19 @@ class _ChannelCard(QWidget):
         layout.setSpacing(6)
         layout.setAlignment(Qt.AlignmentFlag.AlignHCenter)
 
-        # Icon + name
         icon = _CHANNEL_ICONS.get(self._name, "🎵")
         icon_label = QLabel(icon)
         icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         icon_label.setStyleSheet("font-size: 24px;")
         layout.addWidget(icon_label)
 
-        name_label = QLabel(self._name.capitalize())
+        # تبدیل نام‌ها به فارسی برای ظاهر بهتر
+        names_fa = {"rain": "باران", "fireplace": "شومینه", "cafe": "کافه", "keyboard": "کیبورد", "whitenoise": "نویز سفید"}
+        name_label = QLabel(names_fa.get(self._name, self._name.capitalize()))
         name_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         name_label.setObjectName("statCaption")
         layout.addWidget(name_label)
 
-        # Vertical slider
         self._slider = QSlider(Qt.Orientation.Vertical)
         self._slider.setRange(0, 100)
         self._slider.setValue(int(volume * 100))
@@ -68,13 +68,11 @@ class _ChannelCard(QWidget):
         self._slider.valueChanged.connect(self._on_slider)
         layout.addWidget(self._slider, alignment=Qt.AlignmentFlag.AlignHCenter)
 
-        # Volume value label
         self._vol_label = QLabel(f"{int(volume * 100)}%")
         self._vol_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._vol_label.setObjectName("statCaption")
         layout.addWidget(self._vol_label)
 
-        # Mute toggle
         self._mute_btn = QPushButton("🔇")
         self._mute_btn.setObjectName("iconBtn")
         self._mute_btn.setToolTip("قطع/وصل صدا")
@@ -97,16 +95,12 @@ class _ChannelCard(QWidget):
     def set_volume(self, volume: float) -> None:
         self._slider.setValue(int(volume * 100))
 
-
 # ─────────────────────────────────────────────────────────────────────────────
 # AudioPanel
 # ─────────────────────────────────────────────────────────────────────────────
 
 class AudioPanel(QWidget):
-    """
-    Full ambient mixer panel.
-    One _ChannelCard per AudioMixer channel.
-    """
+    """Full ambient mixer panel."""
 
     def __init__(self, mixer: AudioMixer, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -120,7 +114,6 @@ class AudioPanel(QWidget):
         root.setContentsMargins(12, 12, 12, 12)
         root.setSpacing(10)
 
-        # Header
         header = QHBoxLayout()
         title = QLabel("فضاساز صدا")
         title.setObjectName("sectionTitle")
@@ -137,38 +130,53 @@ class AudioPanel(QWidget):
         header.addWidget(stop_all_btn)
         root.addLayout(header)
 
-        # Scroll area containing channel cards
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        # تغییر سیاست اسکرول برای جلوگیری از فشرده‌سازی
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
 
         cards_container = QWidget()
-        self._cards_layout = QHBoxLayout(cards_container)
+        # استفاده از گرید (Grid) به جای لاین افقی
+        self._cards_layout = QGridLayout(cards_container)
         self._cards_layout.setSpacing(8)
-        self._cards_layout.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        self._cards_layout.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter)
 
         scroll.setWidget(cards_container)
         root.addWidget(scroll, stretch=1)
 
-        # Preset row
-        preset_row = QHBoxLayout()
-        preset_row.addWidget(QLabel("پریست:"))
+        # قرار دادن دکمه‌های پریست به صورت Wrap شده
+        preset_label = QLabel("پریست‌ها:")
+        root.addWidget(preset_label)
+        
+        preset_layout = QGridLayout()
+        col = 0
+        row = 0
         for preset_name, preset_data in self._default_presets().items():
             btn = QPushButton(preset_name)
             btn.clicked.connect(lambda checked, d=preset_data: self._apply_preset(d))
-            preset_row.addWidget(btn)
-        preset_row.addStretch()
-        root.addLayout(preset_row)
+            preset_layout.addWidget(btn, row, col)
+            col += 1
+            if col > 1:  # دو دکمه در هر ردیف برای جلوگیری از بیرون زدن
+                col = 0
+                row += 1
+                
+        root.addLayout(preset_layout)
 
     def _populate_channels(self) -> None:
+        row, col = 0, 0
+        max_cols = 3 # حداکثر 3 کارت در هر ردیف
         for name in self._mixer.channel_names():
             vol = self._mixer.get_volume(name)
             card = _ChannelCard(name, vol)
             card.volume_changed.connect(self._on_volume_changed)
             self._cards[name] = card
-            self._cards_layout.addWidget(card)
-
-    # ── Slots ─────────────────────────────────────────────────────────────────
+            
+            # چیدن کارت‌ها در شبکه‌ی گرید
+            self._cards_layout.addWidget(card, row, col)
+            col += 1
+            if col >= max_cols:
+                col = 0
+                row += 1
 
     @Slot(str, float)
     def _on_volume_changed(self, name: str, volume: float) -> None:
@@ -195,10 +203,7 @@ class AudioPanel(QWidget):
                 self._cards[name].set_volume(vol)
         self._mixer.play_all()
 
-    # ── Public API ────────────────────────────────────────────────────────────
-
     def sync_from_mixer(self) -> None:
-        """Re-read volumes from the mixer (e.g. after restore_state)."""
         for name, card in self._cards.items():
             card.set_volume(self._mixer.get_volume(name))
 
